@@ -12,7 +12,12 @@ class ExcelWriter:
         self.fill_header()
 
         for u_idx, user in enumerate(users):
-            self.enumerate_columns_with_fun(lambda c_idx, column: self.ws.write(u_idx + 1, c_idx, getattr(user, column)))
+            def write_fun(c_idx, column):
+                data = getattr(user, column)
+                if isinstance(data, str) or isinstance(data, unicode) and len(data) >= 32767:
+                    data = data[0:32764] + '...'
+                self.ws.write(u_idx + 1, c_idx, data)
+            self.enumerate_columns_with_fun(write_fun)
         self.wb.save(self.filename)
 
     def fill_header(self):
@@ -31,24 +36,24 @@ class ExcelWriter:
                     'university_name',
                     'followers_count',
                     'occupation_type',
+                    'groups_list',
+                    'markets_list',
+                    'movies',
+                    'music',
+                    'tv',
+                    'books',
+                    'interests',
                     'relation',
                     'political',
                     'people_main',
                     'life_main',
                     'smoking',
                     'alcohol',
-                    'has_twitter',
-                    'has_instagram',
-                    'has_photo',
-                    'has_mobile',
-                    'has_site',
                     'can_add_wall_comments',
                     'can_post',
                     'can_see_all_posts',
                     'can_see_audio',
-                    'can_write_private_message',
-                    'has_military',
-                    'graduation'
+                    'can_write_private_message'
     )
 
 

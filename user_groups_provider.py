@@ -18,7 +18,7 @@ class UserGroupsProvider:
         self.batch_size = 25000
 
     def get_user_ids_for_group_id(self, group_id):
-        limit = self.batch_size * 3
+        limit = self.batch_size * 6
         offset = 0
         response = self.get_user_ids(group_id, offset)
         result = response

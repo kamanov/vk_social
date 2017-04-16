@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 from __future__ import division
 from personal_info import PersonalInfo
+from personal_info import encode_str
 from time import sleep
 import string
 from logs import logger
+from vk.exceptions import VkAPIError
 
 
 class SortedList:
@@ -43,7 +45,7 @@ class UsersInfoProvider:
         self.batch_size = 2000
         self.max_rating = max_rating
 
-    def fetch_info_for_user_ids(self, user_ids):
+    def fetch_info_for_user_ids(self, user_ids, save_selected_ids_cache_block):
         assert user_ids, "User ids should be valid"
         logger.debug("Start fetch info for users with count =%s", len(user_ids))
         result = SortedList(self.rating_predicate, self.result_limit)
@@ -54,17 +56,115 @@ class UsersInfoProvider:
             result.append(users)
             offset += self.batch_size
 
-            percent_complete = (offset / len(user_ids)) * 100
+            percent_complete = (min(offset, len(user_ids)) / len(user_ids)) * 100
             if abs(last_percent_complete - percent_complete) > 5:
                 last_percent_complete = percent_complete
-                logger.debug("Fetch in progress : %s%%", last_percent_complete)
+                logger.debug("Fetch personal info in progress : %s%%", last_percent_complete)
 
             if len(result.inner_list) == self.result_limit and self.rating_predicate(result.inner_list[-1]) == self.max_rating:
                 break
-
+        save_selected_ids_cache_block(map(lambda user:user.uid, result.inner_list))
         self.resolve_city_and_country_names_for_users(result.inner_list)
-        logger.debug("Users info fetched with min rating %s", self.rating_predicate(result.inner_list[-1]))
+        self.fill_groups_and_markets_for_users(result.inner_list)
+        logger.debug("Users info fetched with min rating %s and max rating %s", self.rating_predicate(result.inner_list[-1]), self.max_rating)
         return result.inner_list
+
+    def fill_groups_and_markets_for_users(self, users):
+        group_list_batch_size = 25
+        offset = 0
+        last_percent_complete = 0
+
+        while offset < len(users):
+            percent_complete = (min(offset, len(users)) / len(users)) * 100
+            if abs(last_percent_complete - percent_complete) > 5:
+                last_percent_complete = percent_complete
+                logger.debug("Fetch groups and markets in progress : %s%%", last_percent_complete)
+
+            batch_users = users[offset: offset+group_list_batch_size]
+            uid_to_groups = self.fetch_group_list_for_user_ids(map(lambda user: user.uid, batch_users))
+            self.fill_group_list_for_users(batch_users, uid_to_groups)
+            self.fill_markets_for_users(batch_users, uid_to_groups)
+            offset += group_list_batch_size
+        return users
+
+    def fill_markets_for_users(self, users, uid_to_groups):
+        for user in users:
+            groups = uid_to_groups.get(user.uid, [])
+            group_markets = []
+            for group in groups:
+                gid = group.get('gid', 0)
+                market = group.get('market', {})
+                if market.get('enabled', False):
+                    market_id = market.get('main_album_id', 0)
+                    group_markets.append((gid, market_id))
+            if group_markets:
+                markets_info = self.fetch_markets_info(group_markets)
+                user.markets_list = ', '.join(map(lambda market: encode_str(market), markets_info))
+
+    def fetch_markets_info(self, group_markets):
+        self.normalize_request_speed()
+
+        markets_max_size = 25
+        group_markets = group_markets[0:markets_max_size]
+        code = """
+        var group_ids = [$group_ids];
+        var album_ids = $album_ids;
+        var count = $count;
+        var offset = 0;
+        var result = [];
+        while (offset < count) {
+        var gid = group_ids[offset];
+        var album_id = album_ids[offset];
+        var g = API.market.get({\"owner_id\": gid, \"album_id\": album_id});
+        if (g) {
+        result = result + g.slice(1, g[0])@.category@.section@.name;
+        }
+        offset = offset + 1;
+        };
+        return result;
+        """
+        group_ids = ", ".join(map(lambda pair: "\"-" + str(pair[0]) + "\"", group_markets))
+        album_ids = map(lambda pair: pair[1], group_markets)
+        code = string.Template(code.replace('\n', '')).substitute(group_ids=group_ids, album_ids=album_ids,
+                                                                  count=len(group_markets))
+
+        response = []
+        try:
+            response = self.api.execute(code=code)
+        except VkAPIError as err:
+            logger.error("Load market error")
+            if err.code != 10:
+                raise err
+        return list(set(response))
+
+
+    def fill_group_list_for_users(self, users, uid_to_groups):
+        for user in users:
+            groups = uid_to_groups.get(user.uid, [])
+            user.groups_list = ', '.join(map(lambda dictionary: encode_str(dictionary.get('name', '')), groups))
+
+    def fetch_group_list_for_user_ids(self, user_ids):
+        self.normalize_request_speed()
+        code = """
+        var ids = $user_ids;
+        var count = $count;
+        var offset = 0;
+        var result = {};
+        while (offset < count) {
+        var uid = ids[offset];
+        var g = API.groups.get({\"user_id\": uid, \"extended\": 1, \"fields\": [$fields]});
+        if (g) {
+        var res = g.slice(1, g[0]);
+        result.push([uid, res]);
+        }
+        offset = offset + 1;
+        };
+        return result;
+        """
+        code = string.Template(code.replace('\n', '')).substitute(user_ids=user_ids, count=len(user_ids),
+                                                                  fields='\"name\", \"market\"')
+        response = self.api.execute(code=code)
+        return dict(response)
 
     def resolve_city_and_country_names_for_users(self, users):
         city_ids_to_resolve = map(lambda info: info.city_id, users)
@@ -93,6 +193,11 @@ class UsersInfoProvider:
             result.update({country_id: name})
         return result
 
+    def normalize_request_speed(self):
+        self.requests_count += 1
+        if self.requests_count % 5 == 0:
+            sleep(3)
+
     def get_personal_info_for_user_ids(self, user_ids):
         response = self.api.users.get(user_ids=user_ids, fields=PersonalInfo.requared_request_fields())
         assert isinstance(response, list), "get users should return list of ids"
@@ -100,9 +205,7 @@ class UsersInfoProvider:
 
     def get_info_for_user_ids(self, user_ids):
         assert len(user_ids) <= self.batch_size, "It should be less than batch size"
-        self.requests_count += 1
-        if self.requests_count % 10 == 0:
-            sleep(3)
+        self.normalize_request_speed()
         code = """
         var ids = $user_ids;
         var count = $count;

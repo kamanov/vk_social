@@ -10,11 +10,7 @@ class PersonalInfo:
         self.age = self.extract_age(dictionary)
         self.city_id = dictionary.get('city', 0)
         self.country_id = dictionary.get('country', 0)
-        self.has_photo = bool_str(dictionary.get('has_photo'))
-        self.has_mobile = bool_str(dictionary.get('has_mobile'))
-        self.has_site = bool_str(dictionary.get('site', ''))
         self.university_name = encode_str(dictionary.get('university_name', ''))
-        self.graduation = dictionary.get('graduation', 0)
         self.followers_count = dictionary.get('followers_count', 0)
         self.occupation_type = encode_str(dictionary.get('occupation', {}).get('type', ''))
         self.relation = self.extract_relation(dictionary)
@@ -24,15 +20,19 @@ class PersonalInfo:
         self.life_main = self.extract_life_main(about)
         self.smoking = self.extract_smoking(about)
         self.alcohol = self.extract_alcohol(about)
-        self.has_twitter = bool_str(dictionary.get('twitter'))
-        self.has_instagram = bool_str(dictionary.get('instagram'))
         self.can_add_wall_comments = bool_str(dictionary.get('wall_comments'))
         self.can_post = bool_str(dictionary.get('can_post'))
         self.can_see_all_posts = bool_str(dictionary.get('can_see_all_posts'))
         self.can_see_audio = bool_str(dictionary.get('can_see_audio'))
         self.can_write_private_message = bool_str(dictionary.get('can_write_private_message'))
-        self.has_military = bool_str(dictionary.get('military'))
+        self.movies = encode_str(dictionary.get('movies', ''))
+        self.music = encode_str(dictionary.get('music', ''))
+        self.tv = encode_str(dictionary.get('tv', ''))
+        self.books = encode_str(dictionary.get('books', ''))
+        self.interests = encode_str(dictionary.get('interests', ''))
 
+        self.groups_list = ''
+        self.markets_list = ''
         self.country_name = ''
         self.city_name = ''
         self.experiment_group_id = ''
@@ -162,29 +162,28 @@ class PersonalInfo:
             'bdate',
             'city',
             'country',
-            'has_photo',
-            'has_mobile',
             'contacts',
-            'site',
             'education',
             'followers_count',
             'occupation',
             'relation',
             'personal',
-            'connections',
             'wall_comments',
             'can_post',
             'can_see_all_posts',
             'can_see_audio',
             'can_write_private_message',
-            'career',
-            'military'
+            'movies',
+            'music',
+            'tv',
+            'books',
+            'interests'
         ]
         return ", ".join(map(lambda x: "\"" + x + "\"", fields))
 
 
 def encode_str(string):
-    return string.encode('utf-8')
+    return string
 
 
 def bool_str(value):
